@@ -1,0 +1,198 @@
+1.What operations do the following functions perform: film_in_stock, film_not_in_stock, inventory_in_stock, get_customer_balance, inventory_held_by_customer, rewards_report, last_day? You can find these functions in dvd_rental database.
+
+	-film_in_stock
+
+this function will show all films that are available for rental at particular store
+part (film_id = $1) will match specified ID of film 
+(store_id = $2) will show inventory that belongs to specific store 
+(inventory_in_stock) will show true or false if film is available 
+
+	film_not_in_stock
+
+this function will show all films that are currenly not available at particular store (not in stock)
+part (film_id = $1) will match specified ID of film 
+(store_id = $2) will show inventory that belongs to specific store 
+(NOT inventory_in_stock(inventory_id)) will show true if film is rented and false if it's not
+
+	inventory_in_stock
+
+this function will check availability status of specific inventory item 
+item is in stock if there are no rows in rental table
+if rental is 0 then return true 
+function will check if there is date of rental too, if return_date is not NULL then item is not returned yet 
+
+	get_customer_balance
+
+calculate customer's current account balance
+balance is : rental fees for all previous rentals
+one dollar for every day the previous rentals are overdue
+if a film is more than rental_duration * 2 overdue, charge the placement_cost
+subtract all payments made before the date specified 
+at the end we will return rentfees+overfee - payments 
+
+	inventory_held_by_customer
+
+this function will show which customer currently has a specific inventory item checked out
+return customer_id if return_date is NULL and show 
+
+	 rewards_report
+
+this function first will check if min of monthly purchases is > 0 and min monthly dollar 
+must be > 0.00$
+function will generate reports of customers who qualify for rewards based on purchase in the last month 
+last_month_start is first day of month 3 months ago and last_month_end is last day 
+function will return complete customer records 
+
+	last_day
+
+this function will show las day of the month for a given date 
+
+2.Why does ‘rewards_report’ function return 0 rows? Correct and recreate the function, so that it's able to return rows properly.
+-maybe current_date - 3 month because it will show data from 3 months ago and not from previous month 
+-i removed temporary table, maybe that was not the problem but maybe it's easier this way
+-I changed > with >= for more accuracy (i made similar mistake for select homework so maybe it will help here like it helped me)
+- I added MAX and MIN, that worked for me for payment_date
+- here is query: CREATE OR REPLACE FUNCTION public.rewards_report(
+    min_monthly_purchases integer DEFAULT 1,
+    min_dollar_amount_purchased numeric DEFAULT 1.00
+)
+RETURNS SETOF customer
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $function$
+DECLARE
+    data_start DATE;
+    data_end DATE;
+    rr RECORD;
+BEGIN
+
+    SELECT MIN(payment_date), MAX(payment_date) 
+    INTO data_start, data_end
+    FROM payment;
+    
+   --If no payment data exists
+    IF data_start IS NULL THEN
+        RAISE NOTICE 'No payment data exists in the database';
+        RETURN;
+    END IF;
+    
+--find customers 
+    FOR rr IN 
+        SELECT c.* 
+        FROM customer c
+        WHERE c.customer_id IN (
+            SELECT p.customer_id
+            FROM payment p
+            WHERE p.payment_date BETWEEN data_start AND data_end
+            GROUP BY p.customer_id
+            HAVING COUNT(p.payment_id) >= min_monthly_purchases
+            AND SUM(p.amount) >= min_dollar_amount_purchased
+        )
+    LOOP
+        RETURN NEXT rr;
+    END LOOP;
+    
+    RETURN;
+END
+$function$;
+
+
+
+3.Is there any function that can potentially be removed from the dvd_rental codebase? If so, which one and why?
+
+maybe last_day because we can check that in query, inline, it's very easy and  we have built in functions like 'interval '1 month - 1 day' ' ,... 
+it's not so used and needed I think 
+
+and maybe last_updated becausewe can use inline functions easy (but after question 6 i think is also pretty needed)
+
+all other functions is, I think, needed because it's good for specific check and we can't do them inline so easy
+
+
+4. The ‘get_customer_balance’ function describes the business requirements for calculating the client balance. Unfortunately, not all of them are implemented in this function. Try to change function using the requirements from the comments.
+
+-I added replacement cost for 2x overdue rentals 
+-i tried to use joins in this query 
+
+here is code: CREATE OR REPLACE FUNCTION public.get_customer_balance(
+    p_customer_id INTEGER,
+    p_effective_date TIMESTAMP
+)
+RETURNS NUMERIC
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_rentfees NUMERIC(10,2) := 0;  -- Rental fees
+    v_latefees NUMERIC(10,2) := 0;  -- $1 per day late fee
+    v_replacement NUMERIC(10,2) := 0; -- Replacement cost for excessive delay
+    v_payments NUMERIC(10,2) := 0;  -- Payments made before effective date
+BEGIN
+    -- 1. Rental fees
+    SELECT COALESCE(SUM(f.rental_rate), 0)
+    INTO v_rentfees
+    FROM rental r
+    JOIN inventory i ON r.inventory_id = i.inventory_id
+    JOIN film f ON i.film_id = f.film_id
+    WHERE r.customer_id = p_customer_id
+      AND r.rental_date <= p_effective_date;
+
+    -- 2 & 3. Late fees and replacement charges
+    SELECT 
+        COALESCE(SUM(
+            CASE 
+                WHEN r.return_date IS NOT NULL AND r.return_date > (r.rental_date + f.rental_duration * INTERVAL '1 day') THEN
+                    LEAST(
+                        EXTRACT(DAY FROM r.return_date - (r.rental_date + f.rental_duration * INTERVAL '1 day')),
+                        f.rental_duration * 2 -- Cap for daily fee to avoid double-charging
+                    )
+                ELSE 0
+            END
+        ), 0) AS late_days,
+        COALESCE(SUM(
+            CASE 
+                WHEN r.return_date IS NOT NULL AND r.return_date > (r.rental_date + f.rental_duration * INTERVAL '2 day') THEN
+                    f.replacement_cost
+                ELSE 0
+            END
+        ), 0) AS total_replacement
+    INTO v_latefees, v_replacement
+    FROM rental r
+    JOIN inventory i ON r.inventory_id = i.inventory_id
+    JOIN film f ON i.film_id = f.film_id
+    WHERE r.customer_id = p_customer_id
+      AND r.rental_date <= p_effective_date;
+
+    -- 4. Payments before effective date
+    SELECT COALESCE(SUM(p.amount), 0)
+    INTO v_payments
+    FROM payment p
+    WHERE p.customer_id = p_customer_id
+      AND p.payment_date <= p_effective_date;
+
+    -- Return total balance
+    RETURN v_rentfees + v_latefees + v_replacement - v_payments;
+END;
+$$;
+
+
+5.  How do ‘group_concat’ and ‘_group_concat’ functions work? (database creation script might help) Where are they used?
+
+this functions are used when we need to connect multiple row values into a single string 
+it's used to aggregate data based on a certain column or attribute 
+
+6.What does ‘last_updated’ function do? Where is it used?
+automatically updated timestamp fields whenever a record is modified 
+
+7. What is tmpSQL variable for in ‘rewards_report’ function? Can this function be recreated without EXECUTE statement and dynamic SQL? Why?
+
+it's used to construct and execute dynamic SQL queries 
+-here is used to  insert matching customer IDs into temporary table 
+-to select customer records via a FOR rr IN EXECUTE loop
+-to drop the temporary table
+
+and yes it can be rewritten without EXECUTE or dynamic SQL 
+
+
+
+
+
+
