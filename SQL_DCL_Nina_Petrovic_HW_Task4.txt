@@ -1,0 +1,52 @@
+1.How can one restrict access to certain columns of a database table?
+
+	we can do this implementing CLS (column level privileges), it's pretty useful if we want to hide some 	information from some users
+	
+REVOKE ALL ON TABLE customer FROM public;
+
+GRANT SELECT (first_name, last_name, email) ON customer TO example_role; - only specific columns
+
+2.What is the difference between user identification and user authentication?
+	identification is typically used each time a user access and account	
+	authentication is second step, it must match user with previous provided information to ensure that 	person is exactly who they claim to be
+
+3.What are the recommended authentication protocols for PostgreSQL?
+
+Password-Based Authentication
+-MD5 (default), it stores and checks password using MD5 hashing
+ it's easy to set up, but considered weak by modern standards.
+
+SCRAM-SHA-256 
+-stronger and more secure than MD5.
+
+Peer
+-it's sor local connections.
+-uses the OS username to authenticate.
+
+
+LDAP (Lightweight Directory Access Protocol)
+-authenticates PostgreSQL users against an external LDAP server (like Active Directory).
+-great for enterprise environments where user management is centralized.
+
+GSSAPI / Kerberos
+-integrates with Kerberos for single sign-on (SSO).
+-secure and scalable.
+-complex to set up, but great for enterprise SSO.
+
+Certificate-Based Authentication (SSL/TLS)
+-requires client to provide an SSL certificate signed by a trusted authority.
+-fffers strong, mutual authentication.
+
+4.What is proxy authentication in PostgreSQL and what is it for? Why does it make the previously discussed role-based access control easier to implement?
+
+proxy authentication is when one user connects to databse and acts as another user 
+it's usually used for : 
+	Multitenant applications: where each user gets their own role with specific premissions
+	
+	Web apps or APIs
+
+	Row-Level Security (RLS)
+
+it's easier because we can only connect once with general role and later switch roles depending on user accessing the app
+we can define LRS policies with this, it's pretty secure and flexible
+	

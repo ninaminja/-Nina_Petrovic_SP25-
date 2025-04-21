@@ -1,0 +1,9 @@
+
+Task 1. Figure out what security precautions are already used in your 'dvd_rental' database.  Prepare description
+
+SELECT * FROM pg_roles;, I used this query to see which users has permission and privileges; through this i found that our database is protected by role
+main role is postgre so we can do everyting with it, if we change our role to some other one, we will gwt notification that we don't have permission to change or select anything
+
+with this code: SELECT * FROM information_schema.role_table_grants 
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema'); i found that postgre has all permissions to insert, update, truncate, delete, trigger, references for all tables, as well as for rows I added for one of homeworks (matrix, tenet, parasite, sales_revenue_by_category_qtr, table_to_delete)
+
